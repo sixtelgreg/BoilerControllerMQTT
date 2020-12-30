@@ -9,8 +9,8 @@
 
 // OLED display TWI address
 #define OLED_ADDR   0x3C
-#define SCL_PIN 22 // SCL CLK SCK
-#define SDA_PIN 21 // SDA MOSI
+#define SCL_PIN SCL //22 // SCL CLK SCK
+#define SDA_PIN SDA //21 // SDA MOSI
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -53,9 +53,10 @@ void DispAdfSSD1306::Init()
 	u8g2_for_adafruit_gfx.setFontMode(1);                     // use u8g2 none transparent mode
 	u8g2_for_adafruit_gfx.setFontDirection(0);                // left to right (this is default)
 	u8g2_for_adafruit_gfx.setFont(u8g2_font_unifont_t_latin); // select u8g2 font from here: https://github.com/olikraus/u8g2/wiki/fntlistall
+	u8g2_for_adafruit_gfx.setForegroundColor(WHITE);
 	//u8g2_for_adafruit_gfx.setFont(u8g2_font_helvR12_te);
 
-	ShowInfo(3, 30, "Initialization");
+	ShowInfo(3, 50, "Initialization");
 }
 
 void DispAdfSSD1306::ShowInfo(
@@ -64,8 +65,6 @@ void DispAdfSSD1306::ShowInfo(
 	const char* str)
 {
 	display.clearDisplay();
-
-	u8g2_for_adafruit_gfx.setForegroundColor(WHITE);
 	u8g2_for_adafruit_gfx.setCursor(x, y);
 	u8g2_for_adafruit_gfx.print(str);
 
@@ -88,11 +87,8 @@ void DispAdfSSD1306::ShowInfo(
 	const char* str2)
 {
 	display.clearDisplay();
-
-	u8g2_for_adafruit_gfx.setForegroundColor(WHITE);
 	u8g2_for_adafruit_gfx.setCursor(x1, y1);
 	u8g2_for_adafruit_gfx.print(str1);
-
 	u8g2_for_adafruit_gfx.setCursor(x2, y2);
 	u8g2_for_adafruit_gfx.print(str2);
 
@@ -106,9 +102,60 @@ void DispAdfSSD1306::ShowInfo(
 	display.display();
 }
 
+// RSSI example :
+// High quality      90 % ~= -55db
+// Medium quality    50 % ~= -75db
+// Low quality       30 % ~= -85db
+// Unusable quality   8 % ~= -96db
+void DispAdfSSD1306::ShowRssi(int8_t rssi)
+{
+	//rssi = -100;
+	int16_t x = 105;
+	int16_t y = 1;
+	#define barH_1  3
+	#define barH_2  6
+	#define barH_3  9
+	#define barH_4  12
+	#define barDist 5
+
+	u8g2_for_adafruit_gfx.setCursor(x - 9, Row1);
+	u8g2_for_adafruit_gfx.print(rssi);
+	//y += 1;
+
+	auto bar1 = rssi < 0 && rssi > -96 ? WHITE : BLACK;
+	auto bar2 = rssi < 0 && rssi > -85 ? WHITE : BLACK;
+	auto bar3 = rssi < 0 && rssi > -75 ? WHITE : BLACK;
+	auto bar4 = rssi < 0 && rssi > -55 ? WHITE : BLACK;
+	//auto unav = (0 == rssi || rssi <= -96) ? WHITE : BLACK;
+
+	display.drawFastVLine(x, y + barH_4 - barH_1, barH_1, bar1);
+	display.drawFastVLine(x + 1, y + barH_4 - barH_1, barH_1, bar1);
+
+	x += barDist;
+	display.drawFastVLine(x, y + barH_4 - barH_2, barH_2, bar2);
+	display.drawFastVLine(x + 1, y + barH_4 - barH_2, barH_2, bar2);
+
+	x += barDist;
+	display.drawFastVLine(x, y + barH_4 - barH_3, barH_3, bar3);
+	display.drawFastVLine(x + 1, y + barH_4 - barH_3, barH_3, bar3);
+
+	x += barDist;
+	display.drawFastVLine(x, y, barH_4, bar4);
+	display.drawFastVLine(x + 1, y, barH_4, bar4);
+
+	//DrawEllipse(108, 20, 19, 10, U8G_DRAW_ALL);
+
+	//display.drawFastHLine(x, y + 3, 20, unav);
+	//display.drawFastHLine(x, y + 6, 20, unav);
+	//display.drawFastHLine(x, y + 9, 20, unav);
+
+	display.display();
+}
+
+
 void DispAdfSSD1306::Show(
 	uint32_t temperature,
-	const char* time,
+	const char *time,
 	bool appSent,
 	uint8_t sttFlags,
 	uint16_t pauseHeatingLeft, // in min, 0 - is Off
@@ -129,9 +176,7 @@ void DispAdfSSD1306::Show(
 	auto tp = (uint8_t*)& temperature;
 
 	display.clearDisplay();
-	u8g2_for_adafruit_gfx.setForegroundColor(WHITE);
-
-
+	
 	//==DrawAntenna(116, 10);
 	//==DrawAndroid(115, 27);
 	//==DrawTerminal(116, 27);
@@ -146,8 +191,7 @@ void DispAdfSSD1306::Show(
 	//}
 
 	// Draw temperatures
-	for (uint8_t i = 0; i < sensors; ++i)
-	{
+	for (uint8_t i = 0; i < sensors; ++i) {
 		u8g2_for_adafruit_gfx.setCursor(i * 22, Row0);
 		u8g2_for_adafruit_gfx.print(tp[i]);
 	}
@@ -155,56 +199,47 @@ void DispAdfSSD1306::Show(
 	// Draw Mode status: A:ON, A:ON O (disk is auto mode in range), A:OFF
 	u8g2_for_adafruit_gfx.setCursor(0, Row1);
 	u8g2_for_adafruit_gfx.print(S_A_COLON);
-	if (automaticMode)
-	{
+	if (automaticMode) {
 		display.fillCircle(24, Row1 - roundR, roundR, WHITE);
 		u8g2_for_adafruit_gfx.setCursor(40, Row1);
 		u8g2_for_adafruit_gfx.print(S_T_COLON);
 
-		if (inTimeRange)
-		{
-			if (schedulerPaused)
-			{
+		if (inTimeRange) {
+			if (schedulerPaused) {
 				display.writeFillRect(64, Row1 - boxH, 4, boxH, WHITE);
 				display.writeFillRect(71, Row1 - boxH, 4, boxH, WHITE);
 				u8g2_for_adafruit_gfx.setCursor(84, Row1);
 				u8g2_for_adafruit_gfx.print(pauseSchedule);
 			}
-			else
-			{
+			else {
 				display.fillCircle(64, Row1 - roundR, roundR, WHITE);
 			}
 		}
-		else
-		{
+		else {
 			display.drawCircle(64, Row1 - roundR, roundR, WHITE);
 		}
 	}
-	else
-	{
+	else {
 		display.drawCircle(24, Row1 - roundR, roundR, WHITE);
 	}
 
 	// Draw Heating status: H:Auto, H:Manual, [Destination temperature if manual/auto, or time left (min) if paused]
 	u8g2_for_adafruit_gfx.setCursor(0, Row2);
 	u8g2_for_adafruit_gfx.print(S_H_COLON);
-	if (heatingOnProcess)
-	{
+	if (heatingOnProcess) {
 		display.fillCircle(24, Row2 - roundR, roundR, WHITE);
 		u8g2_for_adafruit_gfx.setCursor(40, Row2);
 		u8g2_for_adafruit_gfx.print(manualHeating ? S_M_COLON : S_A_COLON);
 		u8g2_for_adafruit_gfx.setCursor(58, Row2);
 		u8g2_for_adafruit_gfx.print(heatDestTemp);
 	}
-	else if (pauseHeatingLeft > 0)
-	{
+	else if (pauseHeatingLeft > 0) {
 		display.writeFillRect(20, Row2 - boxH, 4, boxH, WHITE);
 		display.writeFillRect(27, Row2 - boxH, 4, boxH, WHITE);
 		u8g2_for_adafruit_gfx.setCursor(40, Row2);
 		u8g2_for_adafruit_gfx.print(pauseHeatingLeft);
 	}
-	else
-	{
+	else {
 		display.drawCircle(24, Row2 - roundR, roundR, WHITE);
 	}
 
@@ -285,32 +320,27 @@ void DispAdfSSD1306::Show(
 //	display.drawLine(x + antCenter, y - antH, x, y - antHSplit, WHITE);
 //}
 
-
 //ELLIPSE
 
 void DispAdfSSD1306::draw_ellipse_section(uint8_t x, uint8_t y, uint8_t x0, uint8_t y0, uint8_t option)
 {
 	/* upper right */
-	if (option & U8G_DRAW_UPPER_RIGHT)
-	{
+	if (option & U8G_DRAW_UPPER_RIGHT) {
 		display.drawPixel(x0 + x, y0 - y, WHITE);
 	}
 
 	/* upper left */
-	if (option & U8G_DRAW_UPPER_LEFT)
-	{
+	if (option & U8G_DRAW_UPPER_LEFT) {
 		display.drawPixel(x0 - x, y0 - y, WHITE);
 	}
 
 	/* lower right */
-	if (option & U8G_DRAW_LOWER_RIGHT)
-	{
+	if (option & U8G_DRAW_LOWER_RIGHT) {
 		display.drawPixel(x0 + x, y0 + y, WHITE);
 	}
 
 	/* lower left */
-	if (option & U8G_DRAW_LOWER_LEFT)
-	{
+	if (option & U8G_DRAW_LOWER_LEFT) {
 		display.drawPixel(x0 - x, y0 + y, WHITE);
 	}
 }
@@ -350,15 +380,13 @@ void DispAdfSSD1306::draw_ellipse(uint8_t x0, uint8_t y0, uint8_t rx, uint8_t ry
 	stopx *= rx;
 	stopy = 0;
 
-	while (stopx >= stopy)
-	{
+	while (stopx >= stopy) {
 		draw_ellipse_section(x, y, x0, y0, option);
 		y++;
 		stopy += rxrx2;
 		err += ychg;
 		ychg += rxrx2;
-		if (2 * err + xchg > 0)
-		{
+		if (2 * err + xchg > 0) {
 			x--;
 			stopx -= ryry2;
 			err += xchg;
@@ -386,22 +414,19 @@ void DispAdfSSD1306::draw_ellipse(uint8_t x0, uint8_t y0, uint8_t rx, uint8_t ry
 	stopy *= ry;
 
 
-	while (stopx <= stopy)
-	{
+	while (stopx <= stopy) {
 		draw_ellipse_section(x, y, x0, y0, option);
 		x++;
 		stopx += ryry2;
 		err += xchg;
 		xchg += ryry2;
-		if (2 * err + ychg > 0)
-		{
+		if (2 * err + ychg > 0) {
 			y--;
 			stopy -= rxrx2;
 			err += ychg;
 			ychg += rxrx2;
 		}
 	}
-
 }
 
 void DispAdfSSD1306::DrawEllipse(uint8_t x0, uint8_t y0, uint8_t rx, uint8_t ry, uint8_t option)
@@ -428,26 +453,22 @@ void DispAdfSSD1306::DrawEllipse(uint8_t x0, uint8_t y0, uint8_t rx, uint8_t ry,
 void DispAdfSSD1306::draw_filled_ellipse_section(uint8_t x, uint8_t y, uint8_t x0, uint8_t y0, uint8_t option)
 {
 	/* upper right */
-	if (option & U8G_DRAW_UPPER_RIGHT)
-	{
+	if (option & U8G_DRAW_UPPER_RIGHT) {
 		display.drawFastVLine(x0 + x, y0 - y, y + 1, WHITE);
 	}
 
 	/* upper left */
-	if (option & U8G_DRAW_UPPER_LEFT)
-	{
+	if (option & U8G_DRAW_UPPER_LEFT) {
 		display.drawFastVLine(x0 - x, y0 - y, y + 1, WHITE);
 	}
 
 	/* lower right */
-	if (option & U8G_DRAW_LOWER_RIGHT)
-	{
+	if (option & U8G_DRAW_LOWER_RIGHT) {
 		display.drawFastVLine(x0 + x, y0, y + 1, WHITE);
 	}
 
 	/* lower left */
-	if (option & U8G_DRAW_LOWER_LEFT)
-	{
+	if (option & U8G_DRAW_LOWER_LEFT) {
 		display.drawFastVLine(x0 - x, y0, y + 1, WHITE);
 	}
 }
@@ -487,15 +508,13 @@ void DispAdfSSD1306::draw_filled_ellipse(uint8_t x0, uint8_t y0, uint8_t rx, uin
 	stopx *= rx;
 	stopy = 0;
 
-	while (stopx >= stopy)
-	{
+	while (stopx >= stopy) {
 		draw_filled_ellipse_section(x, y, x0, y0, option);
 		y++;
 		stopy += rxrx2;
 		err += ychg;
 		ychg += rxrx2;
-		if (2 * err + xchg > 0)
-		{
+		if (2 * err + xchg > 0) {
 			x--;
 			stopx -= ryry2;
 			err += xchg;
@@ -523,22 +542,19 @@ void DispAdfSSD1306::draw_filled_ellipse(uint8_t x0, uint8_t y0, uint8_t rx, uin
 	stopy *= ry;
 
 
-	while (stopx <= stopy)
-	{
+	while (stopx <= stopy) {
 		draw_filled_ellipse_section(x, y, x0, y0, option);
 		x++;
 		stopx += ryry2;
 		err += xchg;
 		xchg += ryry2;
-		if (2 * err + ychg > 0)
-		{
+		if (2 * err + ychg > 0) {
 			y--;
 			stopy -= rxrx2;
 			err += ychg;
 			ychg += rxrx2;
 		}
 	}
-
 }
 
 void DispAdfSSD1306::DrawFilledEllipse(uint8_t x0, uint8_t y0, uint8_t rx, uint8_t ry, uint8_t option)

@@ -1,35 +1,28 @@
-#ifndef ToolStrings_h
-#define ToolStrings_h
+#ifndef TOOL_STRINGS_H
+#define TOOL_STRINGS_H
 
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 #include "DataTypes.h"
+#include "DateTime.h"
 
-class DateTime;
+	const char* MessageReceivedOK(Opcode opcode);
+	const char* CmdGet(Opcode opcode);
+	void CmdGet(Opcode opcode, String& val);
+	const char* MsgGet(MMSG name);
+	void MsgGet(MMSG name, String& val);
+	void MsgCatDec(int num, uint8_t numSign, char *dst);
+	void MsgCatNum(int num, char *dst, uint8_t base = 10);
+	void MsgCat(MMSG name, char *dst);
+	void MsgCat(Opcode opcode, char *dst);
+	void MsgCat(bool condition, MMSG nameTrue, MMSG nameFalse, char *dst);
+	uint16_t SubstringToInt(const String& val, int fr, int to = -1);
+	uint8_t SubstringToByte(const String& val, int fr, int to = -1);
+	void AddDateTimeToStr(String& str, const DateTime *dt, bool wd = false);
+	char* AddDateTimeToStr(char *str, const DateTime *dt, bool wd = false);
+	void Add0Nd(String& str, uint16_t val, size_t width);
+	void Add0Nd(char *str, uint16_t val, size_t width);
 
-class ToolStr
-{
-public:
-	static const char* MessageReceivedOK(Opcode opcode);
-	static const char* CmdGet(Opcode opcode);
-	static void CmdGet(Opcode opcode, String& val);
-	static const char* MsgGet(MMSG name);
-	static void MsgGet(MMSG name, String& val);
-	static void MsgCatDec(int num, uint8_t numSign, char *dst);
-	static void MsgCatNum(int num, char *dst, uint8_t base = 10);
-	static void MsgCat(MMSG name, char *dst);
-	static void MsgCat(Opcode opcode, char *dst);
-	static void MsgCat(bool condition, MMSG nameTrue, MMSG nameFalse, char *dst);
-	static uint16_t SubstringToInt(const String& val, int fr, int to = -1);
-	static uint8_t SubstringToByte(const String& val, int fr, int to = -1);
-	static void AddDateTimeToStr(String& str, const DateTime *dt, bool wd = false);
-	static char* AddDateTimeToStr(char *str, const DateTime* dt, bool wd = false);
-
-	static void add0Nd(String& str, uint16_t val, size_t width);
-	static void add0Nd(char *str, uint16_t val, size_t width);
-};
-#endif
+#endif //TOOL_STRINGS_H

@@ -1,5 +1,9 @@
-#ifndef _HIST_DATE_TIME_H_
-#define _HIST_DATE_TIME_H_
+#ifndef HIST_DATE_TIME_H
+#define HIST_DATE_TIME_H
+
+#if defined(ARDUINO) && ARDUINO >= 100
+#include <Arduino.h>
+#endif
 
 #include "DateTime.h"
 #include "DataTypes.h"

@@ -1,10 +1,8 @@
-#ifndef _DATE_TIME_H_
-#define _DATE_TIME_H_
+#ifndef DATE_TIME_H
+#define DATE_TIME_H
 
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 #include "TimeSpan.h"

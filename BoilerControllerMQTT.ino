@@ -7,11 +7,11 @@
 #include "ToolStrings.h"
 #include "HeatingScheduler.h"
 #include "SimpleTimer.h"
-#include "BinArray.h"
 #include "HistDateTime.h"
 #include "DataContainer.h"
 
 #include <SPI.h>
+#include <FS.h>
 #include <WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>  
@@ -24,9 +24,15 @@
 #include <PubSubClient.h>
 #endif // AsyncMqtt
 
-#define BLUE_LED     05
-#define RELAY_PIN    27
-#define ONE_WIRE_BUS 15
+#ifdef STATUS_LED
+#define BLUE_LED     05  
+#define BLUE_LED_BLINK_PUBLISH 300UL
+#define BLUE_LED_BLINK_MESSAGE 800UL
+#endif // STATUS_LED
+
+#define RELAY_PIN    T7 //27
+#define ONE_WIRE_BUS T3 //15
+#define PUBLISH_HISTORY_DELAY  500UL
 #define NET_FILE_NAME "/net.txt"
 #define SHEDULE_FILE_NAME "/schedule.txt"
 
@@ -41,10 +47,12 @@ String TelemetryTopic;
 String HistoryTTopic;
 String HistoryHTopic;
 String ScheduleTopic;
+String IsAlive;
 String RxTopic;
 int MqttPortNum = 1883;
 
 extern void WiFiEvent(WiFiEvent_t event);
+extern void ShowDispLastStatus();
 
 #ifdef Adfr_SSD1306
 #include "DispAdfSSD1306.h"
@@ -76,8 +84,6 @@ extern void onMqttMessage(
 	unsigned int length);
 #endif // AsyncMqtt
 
-extern void PublishTelemetry(bool ledOn);
-
 #pragma region NTPClient
 // Define NTP Client to get time
 // Set offset time in seconds to adjust for your timezone, for example:
@@ -108,10 +114,10 @@ uint32_t LastTemperatureMeasurement = 0U;
 auto bLTM = reinterpret_cast<byte*>(&LastTemperatureMeasurement);
 #define TAVG AVERAGE(bLTM[SENSORS - 2], bLTM[SENSORS - 1])
 
-#ifdef DSP
-#include "ToolDisp.h"
-ToolDisp Disp;
-#endif // DSP
+BTelemetry LastPublishedTelemetry;
+uint32_t LocalHist[SENSORS] = {0};
+int16_t RawTemperatureSensors[SENSORS] = {0};
+uint16_t LastSttFlags = 0;
 
 #ifdef FLOW
 #include "PeakControl.h"
@@ -179,6 +185,10 @@ extern void OnRTCReadTimer();
 int FlowControlTimerID = -1;
 extern void OnFlowControl();
 #endif // FLOW
+
+#define RSSI_MEASURE_INTERVAL 3000UL // 3 sec
+int RssiMeasureTimerID = -1;
+extern void OnRssiMeasure();
 #pragma endregion
 
 #pragma region Timer#07
@@ -189,8 +199,10 @@ extern void _connectToMqtt();
 
 #pragma region Timer#08
 int _wifiReconnectTimer = -1;
+bool connecting = false;
 #define  WIFI_RECONNECT_INTERVAL 2000UL // 2sec
 extern void _connectToWifi();
+extern void _reconnectToWifi();
 #pragma endregion
 
 #pragma region Timer#09
@@ -206,6 +218,12 @@ extern void _connectToTimeClient();
 extern uint8_t PauseHeatingCmd(uint8_t interval);
 extern bool ManualHeatingCmd(uint8_t temperature); // Destination temperature, or extremal time (2 Hours)
 extern uint8_t AutoHeatingCmd(uint8_t on);
+extern void PublishMqtt(BHeader *header, const char *topic, bool ledOn, bool retained);
+extern void PublishTelemetry(bool ledOn);
+extern void PublishHistoryT(bool ledOn);
+extern void PublishHistoryH(void* v);
+extern void PublishSchedule(bool ledOn);
+extern void PublishIsAlive(bool ledOn);
 
 void setup()
 {
@@ -213,10 +231,13 @@ void setup()
 	LastTemperatureMeasurement = 0U;
 
 	pinMode(RELAY_PIN, OUTPUT);
-	digitalWrite(RELAY_PIN, HIGH);
+	digitalWrite(RELAY_PIN, LOW);
 
+#ifdef STATUS_LED
 	pinMode(BLUE_LED, OUTPUT);
 	digitalWrite(BLUE_LED, LOW);
+#endif // STATUS_LED
+
 
 	delay(500UL); // power-up safety delay
 	// Reset History values
@@ -297,7 +318,8 @@ void setup()
 				case 8:  HistoryTTopic  = MqttChannel + "/" + data;	break;
 				case 9:  HistoryHTopic  = MqttChannel + "/" + data;	break;
 				case 10: ScheduleTopic  = MqttChannel + "/" + data;	break;
-				case 11: RxTopic        = MqttChannel + "/" + data;	break;
+				case 11: IsAlive		= MqttChannel + "/" + data;	break;
+				case 12: RxTopic        = MqttChannel + "/" + data;	break;
 				default: break;
 				}
 				++iData;
@@ -324,6 +346,7 @@ void setup()
 		Dbg.print(F("HistoryT Topic: "));	Dbg.println(HistoryTTopic);
 		Dbg.print(F("HistoryH Topic: "));	Dbg.println(HistoryHTopic);
 		Dbg.print(F("Schedule Topic: "));	Dbg.println(ScheduleTopic);
+		Dbg.print(F("IsAlive Topic: "));	Dbg.println(IsAlive);
 		Dbg.print(F("Rx Topic: "));			Dbg.println(RxTopic);
 #endif // DBG
 
@@ -420,6 +443,9 @@ void setup()
 	SmplTimer.disable(FlowControlTimerID);
 #endif // FLOW
 
+	RssiMeasureTimerID = SmplTimer.setInterval(RSSI_MEASURE_INTERVAL, OnRssiMeasure);
+	SmplTimer.disable(RssiMeasureTimerID);
+
 
 #ifndef SIMULATION // !SIMULATION
 	Sensors.begin();
@@ -472,7 +498,9 @@ void setup()
 	SetupDone = true;
 	SmplTimer.enable(RtcReadTimerID);
 	SmplTimer.enable(UpdateSystemStateTimerID);
-	SmplTimer.setTimeout(500UL, _connectToWifi);
+	SmplTimer.enable(RssiMeasureTimerID);
+	connecting = true;
+	_wifiReconnectTimer = SmplTimer.setTimeout(500UL, _connectToWifi);
 	SmplTimer.enable(TemprHistoryUpdateTimerID);
 	AutoHeatingCmd(1);
 	SmplTimer.setTimeout(5000ul, TemperatureHistoryUpdate);
@@ -488,6 +516,10 @@ void loop()
 			_timeClientForceUpdateTimer = 
 				SmplTimer.setTimeout(TIME_CLIENT_FORCE_UPDATE_INTERVAL, _forceUpdateTimeClient);
 		}
+	}
+
+	if (!WiFi.isConnected() && !connecting && _wifiReconnectTimer < 0) {
+		_wifiReconnectTimer = SmplTimer.setTimeout(1000UL, _reconnectToWifi);
 	}
 
 #ifndef AsyncMqtt
@@ -508,40 +540,98 @@ void loop()
 
 }//--------------------------------------------------------------------------
 
-void PublishTelemetry(bool ledOn) 
+void ShowDispLastStatus() 
 {
-	
-#ifdef AsyncMqtt
-	if (!mqttAsyncClient.connected()) {
-		return;
-	}
-#else
-	if (!mqttClient.connected()) {
-		return;
-	}
-#endif // AsyncMqtt
+	auto time = LastPublishedTelemetry.Time.timestamp();
+#if defined Ucglib_SSD1351 || defined Adfr_SSD1306
+	Dsp.Show(
+		LastPublishedTelemetry.TemperatureMeasurement,
+		time.c_str(),
+		false,
+		LastPublishedTelemetry.Flags,
+		LastPublishedTelemetry.LeftPauseMinutes, // in min, 0 - is Off
+		LastPublishedTelemetry.HeatDestTemp,
+		0);
+	OnRssiMeasure();
+#endif //Ucglib_SSD1351
+}
 
-
-	if (ledOn) {
-		digitalWrite(BLUE_LED, HIGH);
-		SmplTimer.setTimeout(150UL, LedOff);
-	}
-
+#pragma region PUBLISH
+#pragma region IS ALIVE
+void PublishIsAlive(bool ledOn)
+{
+	auto cmd = BCommand(1, Opcode::CMD_IA);
+	PublishMqtt(&cmd.Header, IsAlive.c_str(), ledOn, false);
+}
+#pragma endregion
+#pragma region Publish Telemetry
+void PublishTelemetry(bool ledOn)
+{
 	auto left = Scheduler.LeftPauses();
 	uint16_t LeftPauseMinutes = (-1 == PauseHeatingTimerID) ? 0 :
 		(uint16_t)(SmplTimer.leftTime(PauseHeatingTimerID) / 60000ul); // Left time in minutes
 
 	auto dt = RtcNow();
 
-	auto send = BTelemetry(
-		STAT_FLG,
-		HeatDestTemp,
-		LeftPauseMinutes,
-		left,
-		LastTemperatureMeasurement,
-		dt);
+#ifdef DBG_TLMTR
+	Dbg.println();
+	Dbg.println(F("Telemetry: Last/Current"));
+
+	Dbg.print(F(" Flags: "));
+	Dbg.print(lastTelemetry.Flags);
+	Dbg.print(F(" / "));
+	Dbg.println(STAT_FLG);
+
+	Dbg.print(F(" TemperatureMeasurement: "));
+	Dbg.print(lastTelemetry.TemperatureMeasurement);
+	Dbg.print(F(" / "));
+	Dbg.println(LastTemperatureMeasurement);
+
+	Dbg.print(F(" HeatDestTemp: "));
+	Dbg.print(lastTelemetry.HeatDestTemp);
+	Dbg.print(F(" / "));
+	Dbg.println(HeatDestTemp);
+
+	Dbg.print(F(" LeftPauseMinutes: "));
+	Dbg.print(lastTelemetry.LeftPauseMinutes);
+	Dbg.print(F(" / "));
+	Dbg.println(LeftPauseMinutes);
+
+	Dbg.print(F(" Left: "));
+	Dbg.print(lastTelemetry.Left);
+	Dbg.print(F(" / "));
+	Dbg.println(left);
+#endif // DBG
+
+	if (LastPublishedTelemetry.Flags == STAT_FLG &&
+		LastPublishedTelemetry.TemperatureMeasurement == LastTemperatureMeasurement &&
+		LastPublishedTelemetry.HeatDestTemp == HeatDestTemp &&
+		LastPublishedTelemetry.Left == left &&
+		LastPublishedTelemetry.LeftPauseMinutes == LeftPauseMinutes) {
 
 #ifdef DBG
+		Dbg.println();
+		Dbg.println(F("Telemetry did not change, Not published"));
+#endif // DBG
+		return;
+	}
+
+	//auto send = BTelemetry(
+	//	STAT_FLG,
+	//	HeatDestTemp,
+	//	LeftPauseMinutes,
+	//	left,
+	//	LastTemperatureMeasurement,
+	//	dt);
+
+	LastPublishedTelemetry.Flags = STAT_FLG;
+	LastPublishedTelemetry.TemperatureMeasurement = LastTemperatureMeasurement;
+	LastPublishedTelemetry.HeatDestTemp = HeatDestTemp;
+	LastPublishedTelemetry.Left = left;
+	LastPublishedTelemetry.LeftPauseMinutes = LeftPauseMinutes;
+	LastPublishedTelemetry.Time = dt;
+
+#ifdef DBG_TLMTR
 	Dbg.println();
 	Dbg.println(F("Publish Telemetry:"));
 	Dbg.print(" T: ");
@@ -558,26 +648,52 @@ void PublishTelemetry(bool ledOn)
 	//Dbg.println(send.Header.DataSize);
 #endif // DBG
 
-	auto time = send.Time.timestamp();
-#if defined Ucglib_SSD1351 || defined Adfr_SSD1306
-	Dsp.Show(
-		send.TemperatureMeasurement,
-		time.c_str(),
-		false,
-		send.Flags,
-		send.LeftPauseMinutes, // in min, 0 - is Off
-		send.HeatDestTemp,
-		0);
-#endif //Ucglib_SSD1351
+//	auto time = dt.timestamp();
+//#if defined Ucglib_SSD1351 || defined Adfr_SSD1306
+//	Dsp.Show(
+//		LastPublishedTelemetry.TemperatureMeasurement,
+//		time.c_str(),
+//		false,
+//		LastPublishedTelemetry.Flags,
+//		LastPublishedTelemetry.LeftPauseMinutes, // in min, 0 - is Off
+//		LastPublishedTelemetry.HeatDestTemp,
+//		0);
+//	OnRssiMeasure();
+//#endif //Ucglib_SSD1351
 
-	PublishMqtt(&send.Header, TelemetryTopic.c_str());
-#ifdef DBG
-	Dbg.println();
-	Dbg.print(F("Relay Pin Level: "));
-	Dbg.println(digitalRead(RELAY_PIN) ? F("HIGH") : F("LOW"));
-#endif // DBG
+	ShowDispLastStatus();
+
+	PublishMqtt(&LastPublishedTelemetry.Header, TelemetryTopic.c_str(), ledOn, true);
 }
+#pragma endregion
 
+#pragma region HISTORY TEMPERATURE
+void PublishHistoryT(bool ledOn)
+{
+	uint8_t h = 0;
+	for (; h < TEMP_HIST_DEEP && 0 != TEMP_HISTORY[h]; ++h);
+	auto send = BHistTemp(TEMP_HISTORY, h);
+	PublishMqtt(&send.Header, HistoryTTopic.c_str(), ledOn, true);
+}
+#pragma endregion
+#pragma region HISTORY HEAT
+void PublishHistoryH(void *v)
+{
+	auto ledOn = (nullptr != v);
+	uint8_t h = 0;
+	for (; h < HEAT_HIST_DEEP && HEAT_HISTORY[h].IsValid(); ++h);
+	auto send = BHistHeat(HEAT_HISTORY, h);
+	PublishMqtt(&send.Header, HistoryHTopic.c_str(), ledOn, true);
+}
+#pragma endregion
+#pragma region SCHEDULE
+void PublishSchedule(bool ledOn)
+{
+	auto send = BSchedule(Scheduler.GetJobs());
+	PublishMqtt(&send.Header, ScheduleTopic.c_str(), ledOn, true);
+}
+#pragma endregion
+#pragma endregion
 
 #pragma region Pause Heating
 // Pause heating if heating on process. Interval value in Hours. 25 hours MAX
@@ -802,18 +918,16 @@ void OnRequestSensor()
 
 void OnReadSensor()
 {
-	static int16_t rawSensTempr[SENSORS] = {0};
-
 #ifdef DBG_READ_SENS
 	Dbg.println(F("On Read Sensors"));
 	Dbg.print(F("T: "));
 #endif //DBG
 
 	for (uint8_t s = 0; s < SENSORS; ++s) {
-		rawSensTempr[s] = DEVICE_DISCONNECTED_RAW;
+		RawTemperatureSensors[s] = DEVICE_DISCONNECTED_RAW;
 		// Try max 10 times to read sensors 
-		for (uint8_t i = 0; i < 10 && DEVICE_DISCONNECTED_RAW == rawSensTempr[s]; ++i) {
-			rawSensTempr[s] = Sensors.getTemp(Address[s]);
+		for (uint8_t i = 0; i < 10 && DEVICE_DISCONNECTED_RAW == RawTemperatureSensors[s]; ++i) {
+			RawTemperatureSensors[s] = Sensors.getTemp(Address[s]);
 #ifdef DBG_READ_SENS
 			Dbg.print(F("Sens:"));
 			Dbg.print(s + 1);
@@ -823,8 +937,8 @@ void OnReadSensor()
 #endif //DBG
 		}
 
-		if (DEVICE_DISCONNECTED_RAW == rawSensTempr[s]) {
-			rawSensTempr[s] = (UNKNOWN_TEMPERATURE << 7);
+		if (DEVICE_DISCONNECTED_RAW == RawTemperatureSensors[s]) {
+			RawTemperatureSensors[s] = (UNKNOWN_TEMPERATURE << 7);
 		}
 
 #ifdef DBG_READ_SENS
@@ -837,7 +951,7 @@ void OnReadSensor()
 #ifdef DBG_READ_SENS
 	Dbg.println();
 #endif //DBG
-	CalculateSensorData(rawSensTempr);
+	CalculateSensorData(RawTemperatureSensors);
 	// reread temperature sensors after 
 	SmplTimer.setTimeout(UPDATE_SENSORS_DATA_DELAY, OnRequestSensor);
 }
@@ -845,7 +959,6 @@ void OnReadSensor()
 
 void CalculateSensorData(int16_t *rawSensTempr)
 {
-	static uint32_t sLocalHist[SENSORS] = {0};
 	uint8_t validHd = 0;
 	uint16_t sum = 0;
 	int16_t rawTempr = 0;
@@ -858,8 +971,8 @@ void CalculateSensorData(int16_t *rawSensTempr)
 	for (uint8_t s = 0; s < SENSORS; ++s) {
 		auto rawTempr = rawSensTempr[s];
 		// Free first byte of local hist for new temperature data
-		sLocalHist[s] <<= 8;
-		auto bLocalHistSensorElements = (uint8_t*)(sLocalHist + s);
+		LocalHist[s] <<= 8;
+		auto bLocalHistSensorElements = (uint8_t*)(LocalHist + s);
 
 		// >> 7 - Convert from RAW to Celsius INT (RAW/128).
 		bLocalHistSensorElements[0] = (uint8_t)abs((rawTempr >> 7));
@@ -925,6 +1038,7 @@ void TemperatureHistoryUpdate()
 		TEMP_HISTORY[h] = TEMP_HISTORY[h - 1];
 	}
 	TEMP_HISTORY[0] = LastTemperatureMeasurement;
+	PublishHistoryT(true);
 }
 
 #pragma region OnRTCReadTimer
@@ -969,22 +1083,11 @@ void OnRTCReadTimer()
 	auto heatStt = Scheduler.HeatingStatus(wday, hour, tempAvg);
 		
 #ifdef DBG
-	auto dowStr = ToolStr::MsgGet((MMSG)(wday + (uint8_t)MMSG::STR_WEEK));
+	auto dowStr = MsgGet((MMSG)(wday + (uint8_t)MMSG::STR_WEEK));
 	Dbg.println();
-	Dbg.print(F("Time: "));
+	Dbg.println(F("Scheduler Checking:"));
+	Dbg.print(F(" Time: "));
 	Dbg.println(dt.timestamp());
-
-	//Dbg.print(dt.hour());
-	//Dbg.print(F(":"));
-	//Dbg.print(dt.minute());
-	//Dbg.print(F(" - "));
-	//Dbg.print(dt.day());
-	//Dbg.print(F("."));
-	//Dbg.print(dt.month());
-	//Dbg.print(F("."));
-	//Dbg.println(dt.year());
-
-	//Dbg.print(hour, DEC);
 	Dbg.print(F(" DOW: "));
 	Dbg.print(dowStr);
 	Dbg.print(F("("));
@@ -998,7 +1101,6 @@ void OnRTCReadTimer()
 	Dbg.println((heatStt & eSchFlag::OnTime) != 0 ? F("Y") : F("N"));
 	Dbg.print(F(" Scheduler Paused: "));
 	Dbg.println((heatStt & eSchFlag::Paused) != 0 ? F("Y") : F("N"));
-	Dbg.println();
 #endif // DBG
 
 	auto currHeatingStt = IS_HEATING(STAT_FLG);
@@ -1040,23 +1142,22 @@ void UpdateSystemStateRequestOnes()
 
 void _onUpdateSystemState()
 {
-	static uint16_t prevFlag = 0;
 	auto heatingSttNow = IS_HEATING(STAT_FLG);
 
 	if (IS_FLG_HEATING_OVER_NO(STAT_FLG) && IS_FLG_SENSORS_FAULT_NO(STAT_FLG)) { 
-		digitalWrite(RELAY_PIN, heatingSttNow ? LOW : HIGH);
+		digitalWrite(RELAY_PIN, heatingSttNow ? HIGH : LOW);
 	}
-	else if (LOW == digitalRead(RELAY_PIN)) {
+	else if (HIGH == digitalRead(RELAY_PIN)) {
 		// Problem condition
-		digitalWrite(RELAY_PIN, HIGH);
+		digitalWrite(RELAY_PIN, LOW);
 #ifdef DBG_SELF_CHECKING
 		Dbg.println(F("Self Checking Control - Overheat or Sensor reading fault. Relay: OFF"));
 #endif // DBG_SELF_CHECKING
 	}
 
-	if (heatingSttNow != IS_HEATING(prevFlag)) {
-		SetHeatingHistory(heatingSttNow, prevFlag);
-		prevFlag = STAT_FLG;
+	if (heatingSttNow != IS_HEATING(LastSttFlags)) {
+		SetHeatingHistory(heatingSttNow, LastSttFlags);
+		LastSttFlags = STAT_FLG;
 
 #ifdef DBG
 		Dbg.println();
@@ -1096,6 +1197,25 @@ void SetHeatingHistory(bool on, uint16_t flagPrev)
 		Dbg.println(F("Set To History Slot#0: ON"));
 #endif // DBG_HIST
 	}
+
+	SmplTimer.setTimeout(PUBLISH_HISTORY_DELAY, PublishHistoryH, (void*)1);
+}
+
+void OnRssiMeasure()
+{
+	int8_t rssi = 0;
+	if (WiFi.isConnected() && _timeClientForceUpdateTimer < 0) {
+		rssi = WiFi.RSSI();
+	}
+#ifdef DBG
+	Dbg.println();
+	Dbg.print(F("RSSI : "));
+	Dbg.println(rssi);
+#endif // DBG
+
+#ifdef Adfr_SSD1306
+	Dsp.ShowRssi(rssi);
+#endif // Adfr_SSD1306
 }
 
 //==================================== FLOW CONTROL =================================
@@ -1179,7 +1299,11 @@ DateTime RtcNow()
 	return dt;
 }
 
-void PublishMqtt(BHeader *header, const char* topic)
+void PublishMqtt(
+	BHeader *header, 
+	const char *topic, 
+	bool ledOn,
+	bool retained)
 {
 	auto toSend = header->FullSize;
 	auto arrPtr = (char*)header;
@@ -1201,19 +1325,36 @@ void PublishMqtt(BHeader *header, const char* topic)
 #ifdef AsyncMqtt
 	auto rc = mqttAsyncClient.publish(topic, 0, true, (char*)header, toSend);
 #else
-	auto rc = mqttClient.publish_P(topic, (byte*)header, toSend, true);
+	auto rc = mqttClient.publish_P(topic, (byte*)header, toSend, retained);
 #endif // AsyncMqtt
 
 	
 #ifdef DBG
+	auto dt = RtcNow();
 	Dbg.println();
 	Dbg.println(F("Publish:"));
+	Dbg.print(F(" Time: "));
+	Dbg.println(dt.timestamp());
 	Dbg.print(F(" Topic: "));
 	Dbg.println(topic);
 	Dbg.print(F(" Opcode: "));
-	Dbg.println(ToolStr::CmdGet(header->OpCode));
+	Dbg.println(CmdGet(header->OpCode));
 	Dbg.print(F(" Size: "));
 	Dbg.println(toSend);
+
+	if (Opcode::CMD_RT == header->OpCode) {
+		Dbg.print(" Sensors: ");
+		Dbg.print(bLTM[0]);
+		Dbg.print(" ");
+		Dbg.print(bLTM[1]);
+		Dbg.print(" ");
+		Dbg.print(bLTM[2]);
+		Dbg.print(" ");
+		Dbg.println(bLTM[3]);
+	}
+
+	Dbg.print(F(" Relay: "));
+	Dbg.println(digitalRead(RELAY_PIN) ? F("ON") : F("OFF"));
 
 	if (rc) {
 		Dbg.println(F("== Success =="));
@@ -1225,46 +1366,186 @@ void PublishMqtt(BHeader *header, const char* topic)
 		Dbg.print(F("Tried to Publish: "));
 		Dbg.println(plannedSend);
 	}
+
+#ifdef STATUS_LED
+	if (ledOn) {
+		digitalWrite(BLUE_LED, HIGH);
+		SmplTimer.setTimeout(BLUE_LED_BLINK_PUBLISH, LedOff);
+	}
+#endif // STATUS_LED
+
 #endif // DBG
 }
 
+#ifdef STATUS_LED
 void LedOff()
 {
 	digitalWrite(BLUE_LED, LOW);
 }
+#endif // STATUS_LED
+
 
 void WiFiEvent(WiFiEvent_t event) 
 {
-#ifdef DBG
-	Dbg.printf("[WiFi-event] event: %d\n", event);
-#endif // DBG
+	String wifi;
 	switch (event) {
-	case SYSTEM_EVENT_STA_GOT_IP:
+	case SYSTEM_EVENT_STA_GOT_IP: // ESP32 station got IP from connected AP
 #ifdef DBG
-		Dbg.println("WiFi connected");
-		Dbg.print(" IP address: ");
+		Dbg.println(F("case: SYSTEM_EVENT_STA_GOT_IP"));
+		Dbg.println(F("WiFi connected"));
+		Dbg.print(F(" IP address: "));
 		Dbg.println(WiFi.localIP());
-		Dbg.print(" SSID: ");
+		Dbg.print(F(" SSID: "));
 		Dbg.println(WiFi.SSID());
-		Dbg.print(" Channel: ");
+		Dbg.print(F(" RSSI: "));
+		Dbg.println(WiFi.RSSI());
+		Dbg.print(F(" Channel: "));
 		Dbg.println(WiFi.channel());
 #endif // DBG
+		connecting = false;
 		_connectToTimeClient();
 		_connectToMqtt();	
+		ShowDispLastStatus();
 		break;
-	case SYSTEM_EVENT_STA_DISCONNECTED:
+	case SYSTEM_EVENT_STA_DISCONNECTED: // ESP32 station disconnected from AP
 #ifdef DBG
-		Dbg.println("WiFi lost connection");
+		Dbg.println(F("case: SYSTEM_EVENT_STA_DISCONNECTED"));
+		Dbg.println(F("WiFi lost connection"));
 #endif // DBG
 #ifdef Adfr_SSD1306
-		auto wifi = "Wifi: " + WiFi.SSID();
+		wifi = "Wifi: " + WiFi.SSID();
 		Dsp.ShowInfo(
 			0, 20, wifi.c_str(),
 			0, 50, "Connection Lost");
 #endif //Adfr_SSD1306
 		timeClient.end();
 		SmplTimer.deleteTimer(_mqttReconnectTimer);
-		_wifiReconnectTimer = SmplTimer.setTimeout(WIFI_RECONNECT_INTERVAL, _connectToWifi);
+		connecting = true;
+		_wifiReconnectTimer = SmplTimer.setTimeout(WIFI_RECONNECT_INTERVAL, _reconnectToWifi);
+		break;
+	case SYSTEM_EVENT_WIFI_READY: // ESP32 WiFi ready
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_WIFI_READY"));
+#endif // DBG
+		break;
+	case SYSTEM_EVENT_SCAN_DONE: // ESP32 finish scanning AP
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_SCAN_DONE"));
+#endif // DBG
+		break;     
+	case SYSTEM_EVENT_STA_START: // ESP32 station start
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_START"));
+#endif // DBG
+		break;  
+	case SYSTEM_EVENT_STA_STOP: // ESP32 station stop
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_STOP"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_STA_CONNECTED: // ESP32 station connected to AP
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_CONNECTED"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_STA_AUTHMODE_CHANGE: // the auth mode of AP connected by ESP32 station changed 
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_AUTHMODE_CHANGE"));
+#endif // DBG
+		break;
+	case SYSTEM_EVENT_STA_LOST_IP: // ESP32 station lost IP and the IP is reset to 0
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_LOST_IP"));
+#endif // DBG
+		break;
+	case SYSTEM_EVENT_STA_WPS_ER_SUCCESS: // ESP32 station wps succeeds in enrollee mode
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_WPS_ER_SUCCESS"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_STA_WPS_ER_FAILED: // ESP32 station wps fails in enrollee mode
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_WPS_ER_FAILED"));
+#endif // DBG
+		break;  
+	case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT: // ESP32 station wps timeout in enrollee mode
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_WPS_ER_TIMEOUT"));
+#endif // DBG
+		break;  
+	case SYSTEM_EVENT_STA_WPS_ER_PIN: // ESP32 station wps pin code in enrollee mode
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_WPS_ER_PIN"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_STA_WPS_ER_PBC_OVERLAP: // ESP32 station wps overlap in enrollee mode
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_STA_WPS_ER_PBC_OVERLAP"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_AP_START: // ESP32 soft-AP start
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_START"));
+#endif // DBG
+		break;    
+	case SYSTEM_EVENT_AP_STOP: // ESP32 soft-AP stop
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_STOP"));
+#endif // DBG
+		break;        
+	case SYSTEM_EVENT_AP_STACONNECTED: // a station connected to ESP32 soft-AP
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_STACONNECTED"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_AP_STADISCONNECTED: // a station disconnected from ESP32 soft-AP
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_STADISCONNECTED"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_AP_STAIPASSIGNED: // ESP32 soft-AP assign an IP to a connected station
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_STAIPASSIGNED"));
+#endif // DBG
+		break;      
+	case SYSTEM_EVENT_AP_PROBEREQRECVED: // Receive probe request packet in soft-AP interface
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_AP_PROBEREQRECVED"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_GOT_IP6: // ESP32 station or ap or ethernet interface v6IP addr is preferred
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_GOT_IP6"));
+#endif // DBG
+		break;    
+	case SYSTEM_EVENT_ETH_START: // ESP32 ethernet start
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_ETH_START"));
+#endif // DBG
+		break;     
+	case SYSTEM_EVENT_ETH_STOP: // ESP32 ethernet stop
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_ETH_STOP"));
+#endif // DBG
+		break;  
+	case SYSTEM_EVENT_ETH_CONNECTED: // ESP32 ethernet phy link up
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_ETH_CONNECTED"));
+#endif // DBG
+		break;   
+	case SYSTEM_EVENT_ETH_DISCONNECTED: // ESP32 ethernet phy link down
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_ETH_DISCONNECTED"));
+#endif // DBG
+		break; 
+	case SYSTEM_EVENT_ETH_GOT_IP: // ESP32 ethernet got IP from connected AP
+#ifdef DBG
+		Dbg.println(F("case: SYSTEM_EVENT_ETH_GOT_IP"));
+#endif // DBG
+		break;
+
+	default:
+		//connecting = false;
 		break;
 	}
 }
@@ -1273,15 +1554,32 @@ void _connectToWifi()
 {
 	_wifiReconnectTimer = -1;
 #ifdef DBG
-	Dbg.println("Connecting to Wi-Fi...");
+	Dbg.println(F("Connecting to Wi-Fi..."));
 #endif // DBG
+	connecting = true;
 	WiFi.begin(WifiSsid.c_str(), WifiPswd.c_str());
+}
+
+void _reconnectToWifi()
+{
+	_wifiReconnectTimer = -1;
+#ifdef Adfr_SSD1306
+	auto wifi = "Wifi: " + WiFi.SSID();
+	Dsp.ShowInfo(
+		0, 20, wifi.c_str(),
+		0, 50, "Reconnect");
+#endif //Adfr_SSD1306
+#ifdef DBG
+	Dbg.println(F("Reconnect to Wi-Fi..."));
+#endif // DBG
+	connecting = true;
+	WiFi.reconnect();
 }
 
 void _connectToTimeClient()
 {
 #ifdef DBG
-	Dbg.println("Connecting to Time Client...");
+	Dbg.println(F("Connecting to Time Client..."));
 #endif // DBG
 	timeClient.begin();
 }
@@ -1290,7 +1588,7 @@ void _forceUpdateTimeClient()
 {
 	_timeClientForceUpdateTimer = -1;
 #ifdef DBG
-	Dbg.println("Force updating Time Client...");
+	Dbg.println(F("Force updating Time Client..."));
 #endif // DBG
 	timeClient.forceUpdate();
 }
@@ -1298,7 +1596,7 @@ void _forceUpdateTimeClient()
 void _connectToMqtt() 
 {
 #ifdef DBG
-	Dbg.println("Connecting to MQTT...");
+	Dbg.println(F("Connecting to MQTT..."));
 #endif // DBG
 
 #ifdef AsyncMqtt
@@ -1389,13 +1687,19 @@ void onMqttMessage(
 	unsigned int length)
 #endif // AsyncMqtt
 {
+#ifdef STATUS_LED
 	digitalWrite(BLUE_LED, HIGH);
-	SmplTimer.setTimeout(500UL, LedOff);
+	SmplTimer.setTimeout(BLUE_LED_BLINK_MESSAGE, LedOff);
+#endif // STATUS_LED
+
 	auto header = (BHeader*)payload;
 
 #ifdef DBG
+	auto dt = RtcNow();
 	Dbg.println();
 	Dbg.println(F("Message received:"));
+	Dbg.print(F(" Time: "));
+	Dbg.println(dt.timestamp());
 	Dbg.print(F(" Topic: "));
 	Dbg.println(topic);
 	Dbg.print(F(" Length: "));
@@ -1415,12 +1719,25 @@ void onMqttMessage(
 	Dbg.print(F(" App ID: "));
 	Dbg.println(header->Id, HEX); // 0x3A505041 // 978,341,953
 	Dbg.print(F(" Opcode: "));
-	Dbg.println(ToolStr::CmdGet(header->OpCode));
+	Dbg.println(CmdGet(header->OpCode));
+	Dbg.print(F(" Opcode Num: "));
+	Dbg.println(header->OpCode);
 	Dbg.print(F(" Data Size: "));
 	Dbg.println(header->DataSize);
+
+	if (header->DataSize > 0) {
+		auto cmd = (BCommand*)payload;
+		Dbg.print(F(" Command: "));
+		Dbg.println(cmd->Command);
+	}
 #endif // DBG
 
 	switch (header->OpCode) {
+	case Opcode::CMD_IA:
+	{
+		PublishIsAlive(false);
+		break;
+	}
 	case Opcode::CMD_RT: // Read Telemetry. Key: [RT], Return Value: [Flags][Temperature Sensors]
 	{
 		PublishTelemetry(false);
@@ -1428,18 +1745,12 @@ void onMqttMessage(
 	}
 	case Opcode::CMD_HT: // Get Temperature History. Key: [HT]
 	{
-		uint8_t h = 0;
-		for (; h < TEMP_HIST_DEEP && 0 != TEMP_HISTORY[h]; ++h);
-		auto send = BHistTemp(TEMP_HISTORY, h);
-		PublishMqtt(&send.Header, HistoryTTopic.c_str());
+		PublishHistoryT(false);
 		break;
 	}
 	case Opcode::CMD_HH: // Get Heating History. Key: [HH]
 	{
-		uint8_t h = 0;
-		for (; h < HEAT_HIST_DEEP && HEAT_HISTORY[h].IsValid(); ++h);
-		auto send = BHistHeat(HEAT_HISTORY, h);
-		PublishMqtt(&send.Header, HistoryHTopic.c_str());
+		SmplTimer.setTimeout(PUBLISH_HISTORY_DELAY, PublishHistoryH, nullptr);
 		break;
 	}
 	case Opcode::CMD_AH: // Automatic(Scheduled) Heating ON/OFF. Key: [AH], Value: [1/0]
@@ -1475,12 +1786,6 @@ void onMqttMessage(
 		PublishTelemetry(true);
 		break;
 	}
-	case Opcode::CMD_GS: // Get Schedule. Key: [GS], Return Value: All of the Schedules
-	{
-		auto send = BSchedule(Scheduler.GetJobs());
-		PublishMqtt(&send.Header, ScheduleTopic.c_str());
-		break;
-	}
 	case Opcode::CMD_US: // Update Schedule. Key: [US], Input Value: [ID,DOW,Fr,To,Tmp], Return Value: Schedule ID
 	{
 		if (0 == header->DataSize) {
@@ -1503,9 +1808,10 @@ void onMqttMessage(
 #endif // DBG
 			}
 		}
-
-		auto send = BSchedule();
-		PublishMqtt(&send.Header, ScheduleTopic.c_str());
+	}
+	case Opcode::CMD_GS: // Get Schedule. Key: [GS], Return Value: All of the Schedules
+	{
+		PublishSchedule(false);
 		break;
 	}
 	//	case Opcode::CMD_DS: // Reset all of Schedules to a default(from EPROM). Key: [DS], Return Value: All of the Schedules

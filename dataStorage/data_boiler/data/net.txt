@@ -1,7 +1,7 @@
-WiFi SSID:[MxP024]#
+WiFi SSID:[MxP124]#
 WiFi Passw:[alonaalona]#
 MQTT Domain:[mqtt.beebotte.com]#
-MQTT Client:[RoofBoilerController_01]#
+MQTT Client:[RoofBoilerController_001]#
 MQTT Port:[1883]#
 MQTT Token:[token_wpa5EXxaUXbxT1yM]#
 MQTT Channel:[boiler]#
@@ -9,4 +9,5 @@ MQTT Topic:[Telemetry]#
 MQTT Topic:[HistoryT]#
 MQTT Topic:[HistoryH]#
 MQTT Topic:[Schedule]#
+MQTT Topic:[IsAlive]#
 MQTT Topic:[RX]#

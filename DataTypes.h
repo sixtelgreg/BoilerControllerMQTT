@@ -1,10 +1,8 @@
-#ifndef _DataTypes_h
-#define _DataTypes_h
+#ifndef DATA_TYPES_H
+#define DATA_TYPES_H
 
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 #ifdef DBG
@@ -75,6 +73,7 @@
 #define S_APP F("APP")
 #define S_F1  F("??")
 #define S_RT  F("RT")
+#define S_IA  F("IA")
 #define S_BR  F("BR")
 #define S_ST  F("ST")
 #define S_GT  F("GT")
@@ -189,6 +188,7 @@ enum Opcode : uint8_t
 {
 	CMD_NONE = 0,
 	// OBSOLETE == CMD_F1 = 1, // Get Help.	 	Key: [??], Value: ------
+	CMD_IA = 1, // Is Alive.	 				Key: [IA], Value: ------
 	CMD_RT = 2, // Read Telemetry.	 			Key: [RT], Value: ------
 	// OBSOLETE == CMD_BR = 3, // Broadcasting.	Key: [BR], Value: [TEMP][FLAGS]
 	// OBSOLETE == CMD_ST = 4, // Set Time.		Key: [ST], Value: [Y,M,D,H,Min,WD]

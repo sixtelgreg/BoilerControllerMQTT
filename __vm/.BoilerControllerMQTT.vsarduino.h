@@ -16,9 +16,9 @@
 #define __ESP32_esp32__
 #define __ESP32_ESP32__
 #define DBG
-#define BoilerEsp32
 #define _AsyncMqtt
 #define Adfr_SSD1306
+#define _STATUS_LED
 #define ESP_PLATFORM
 #define HAVE_CONFIG_H
 #define GCC_NOT_5_2_0 0

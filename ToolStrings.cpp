@@ -1,18 +1,17 @@
 #include "ToolStrings.h"
-#include "DateTime.h"
 
-const char* ToolStr::MessageReceivedOK(Opcode opcode)
+const char* MessageReceivedOK(Opcode opcode)
 {
 	// Reserved capacity of 10 chars
 	//"\nRT: OK\n\0"
 	static String val("          "); 
 	val += F("\n");
-	val += ToolStr::CmdGet(opcode);
+	val += CmdGet(opcode);
 	val += F(": OK\n");
 	return val.c_str();
 }
 
-const char* ToolStr::CmdGet(Opcode opcode)
+const char* CmdGet(Opcode opcode)
 {
 	// Reserved capacity of 3 chars
 	//"RT\0"
@@ -21,18 +20,18 @@ const char* ToolStr::CmdGet(Opcode opcode)
 	return val.c_str();
 }
 
-void ToolStr::CmdGet(Opcode opcode, String& val)
+void CmdGet(Opcode opcode, String& val)
 {
 	// Reserved capacity of 3 chars
 	//"RT\0"
-	switch (opcode)
-	{
+	switch (opcode) {
 	default:
 		val = "";
 		break;
 
 	// OBSOLETE == case Opcode::CMD_F1: val = S_F1; break;
 	case Opcode::CMD_RT: val = S_RT; break;
+	case Opcode::CMD_IA: val = S_IA; break;
 	// OBSOLETE == case Opcode::CMD_BR: val = S_BR; break;
 	// OBSOLETE == case Opcode::CMD_ST: val = S_ST; break;
 	// OBSOLETE == case Opcode::CMD_GT: val = S_GT; break;
@@ -49,7 +48,7 @@ void ToolStr::CmdGet(Opcode opcode, String& val)
 	}
 }
 
-const char* ToolStr::MsgGet(MMSG name)
+const char* MsgGet(MMSG name)
 {
 	// Reserved capacity of 10 chars
 	static String val("          ");
@@ -57,12 +56,11 @@ const char* ToolStr::MsgGet(MMSG name)
 	return val.c_str();
 }
 
-void ToolStr::MsgGet(MMSG name, String& val)
+void MsgGet(MMSG name, String& val)
 {
-	switch (name)
-	{
+	switch (name) {
 #pragma region Status
-	//case MMSG::WAIT_RESULT:	val = F("ACPT, wait...");	break;
+		//case MMSG::WAIT_RESULT:	val = F("ACPT, wait...");	break;
 	case MMSG::STR_OK:	val = S_OK;  break;
 	case MMSG::STR_ERR:	val = S_ERR; break;
 	case MMSG::STR_NO:	val = S_NO;  break;
@@ -135,10 +133,11 @@ void ToolStr::MsgGet(MMSG name, String& val)
 	}
 }
 
-void ToolStr::MsgCatDec(int num, uint8_t numSign, char* dst)
+void MsgCatDec(int num, uint8_t numSign, char* dst)
 {
-	if (nullptr == dst)
-		{ return; }
+	if (nullptr == dst) {
+		return;
+	}
 
 	bool minus = (num < 0);
 	num = abs(num);
@@ -151,140 +150,160 @@ void ToolStr::MsgCatDec(int num, uint8_t numSign, char* dst)
 		(9999 < num && num < 100000) ? 5 :
 		(99999 < num && num < 1000000) ? 6 : 0;
 
-	if (minus)
-		{ MsgCat(MMSG::STR_MINUS, dst); }
+	if (minus) {
+		MsgCat(MMSG::STR_MINUS, dst);
+	}
 
 	uint8_t addZeros = min(6, max(0, numSign - sign));
 
-	for (uint8_t i = 0; i < addZeros; ++i)
-		{ MsgCat(MMSG::STR_0, dst); }
+	for (uint8_t i = 0; i < addZeros; ++i) {
+		MsgCat(MMSG::STR_0, dst);
+	}
 
 	MsgCatNum(num, dst);
 }
 
-void ToolStr::MsgCatNum(int num, char* dst, uint8_t base)
+void MsgCatNum(int num, char* dst, uint8_t base)
 {
-	if (nullptr == dst)
-		{ return; }
-		
+	if (nullptr == dst) {
+		return;
+	}
+
 	int toInd = strlen(dst);
 	itoa(num, dst + toInd, base);
 }
 
-void ToolStr::MsgCat(MMSG name, char *dst)
+void MsgCat(MMSG name, char* dst)
 {
-	if (nullptr == dst)
-		{ return; }
+	if (nullptr == dst) {
+		return;
+	}
 
 	auto val = MsgGet(name);
-	if (strlen(val) > 0)
-		{ strcat(dst, val); }
+	if (strlen(val) > 0) {
+		strcat(dst, val);
+	}
 }
 
-void ToolStr::MsgCat(Opcode opcode, char* dst)
+void MsgCat(Opcode opcode, char* dst)
 {
-	if (nullptr == dst)
-		{ return; }
+	if (nullptr == dst) {
+		return;
+	}
 
 	auto val = CmdGet(opcode);
-	if (strlen(val) > 0)
-		{ strcat(dst, val); }
+	if (strlen(val) > 0) {
+		strcat(dst, val);
+	}
 }
 
-void ToolStr::MsgCat(bool condition, MMSG nameTrue, MMSG nameFalse, char* dst)
+void MsgCat(bool condition, MMSG nameTrue, MMSG nameFalse, char* dst)
 {
-	if (nullptr == dst)
-		{ return; }
+	if (nullptr == dst) { 
+		return; 
+	}
 
 	auto val = MsgGet(condition ? nameTrue : nameFalse);
-	if (strlen(val) > 0)
-		{ strcat(dst, val); }
+	if (strlen(val) > 0) { 
+		strcat(dst, val); 
+	}
 }
 
-uint16_t ToolStr::SubstringToInt(const String& val, int fr, int to)
+uint16_t SubstringToInt(const String& val, int fr, int to)
 {
-	if (fr < 0)
-		{ return 0; }
+	if (fr < 0) {
+		return 0;
+	}
 	auto sub = (to <= fr) ? val.substring(fr) : val.substring(fr, to);
 	sub.trim();
 	return (uint16_t)sub.toInt();
 }
 
-uint8_t ToolStr::SubstringToByte(const String& val, int fr, int to)
+uint8_t SubstringToByte(const String& val, int fr, int to)
 {
-	if (fr < 0)
-		{ return 0; }
+	if (fr < 0) {
+		return 0; 
+	}
 
 	auto sub = (to <= fr) ? val.substring(fr) : val.substring(fr, to);
 	sub.trim();
 	return (uint8_t)sub.toInt();
 }
 
-void ToolStr::add0Nd(String& str, uint16_t val, size_t width)
+void AddDateTimeToStr(String& str, const DateTime* dt, bool wd)
 {
-	if (width >= 5 && val < 1000) 
-		{ str += '0'; }
-	if (width >= 4 && val < 100) 
-		{ str += '0'; }
-	if (width >= 3 && val < 100) 
-		{ str += '0'; }
-	if (width >= 2 && val < 10) 
-		{ str += '0'; }
-	str += val;
-}
+	if (nullptr == dt) {
+		return;
+	}
 
-void ToolStr::AddDateTimeToStr(String& str, const DateTime *dt, bool wd)
-{
-	if (nullptr == dt)
-		{ return; }
-
-	if (wd)
-	{
+	if (wd) {
 		str += MsgGet((MMSG)(dt->dayOfTheWeek() + (uint8_t)MMSG::STR_WEEK));
 		str += ' ';
 	}
-	add0Nd(str, dt->year(), 4);
+	Add0Nd(str, dt->year(), 4);
 	str += '.';
-	add0Nd(str, dt->month(), 2);
+	Add0Nd(str, dt->month(), 2);
 	str += '.';
-	add0Nd(str, dt->day(), 2);
+	Add0Nd(str, dt->day(), 2);
 	str += ' ';
-	add0Nd(str, dt->hour(), 2);
+	Add0Nd(str, dt->hour(), 2);
 	str += ':';
-	add0Nd(str, dt->minute(), 2);
+	Add0Nd(str, dt->minute(), 2);
 }
 
-char* ToolStr::AddDateTimeToStr(char* str, const DateTime *dt, bool wd)
+char* AddDateTimeToStr(char* str, const DateTime* dt, bool wd)
 {
-	if (nullptr == dt)
-		{ return str; }
-	if (wd)
-	{
+	if (nullptr == dt) {
+		return str;
+	}
+
+	if (wd) {
 		MsgCat(MMSG::STR_WEEK, str);
 		strcat(str, " ");
 	}
 
-	add0Nd(str, dt->year(), 4);
+	Add0Nd(str, dt->year(), 4);
 	strcat(str, ".");
-	add0Nd(str, dt->month(), 2);
+	Add0Nd(str, dt->month(), 2);
 	strcat(str, ".");
-	add0Nd(str, dt->day(), 2);
+	Add0Nd(str, dt->day(), 2);
 	strcat(str, " ");
-	add0Nd(str, dt->hour(), 2);
+	Add0Nd(str, dt->hour(), 2);
 	strcat(str, ":");
-	add0Nd(str, dt->minute(), 2);
+	Add0Nd(str, dt->minute(), 2);
 	return str;
 }
 
-void ToolStr::add0Nd(char *str, uint16_t val, size_t width)
+void Add0Nd(char* str, uint16_t val, size_t width)
 {
-	if (width >= 5 && val < 1000)
-		{ strcat(str, "0"); }
-	if (width >= 4 && val < 100)
-		{ strcat(str, "0"); }
-	if (width >= 3 && val < 100)
-		{ strcat(str, "0"); }
-	if (width >= 2 && val < 10)
-		{ strcat(str, "0"); }
+	if (width >= 5 && val < 1000) {
+		strcat(str, "0");
+	}
+	if (width >= 4 && val < 100) {
+		strcat(str, "0");
+	}
+	if (width >= 3 && val < 100) {
+		strcat(str, "0");
+	}
+	if (width >= 2 && val < 10) {
+		strcat(str, "0");
+	}
 	itoa(val, str + strlen(str), 10);
+}
+
+void Add0Nd(String& str, uint16_t val, size_t width)
+{
+	if (width >= 5 && val < 1000) {
+		str += '0';
+	}
+	if (width >= 4 && val < 100) {
+		str += '0';
+	}
+	if (width >= 3 && val < 100) {
+		str += '0';
+	}
+	if (width >= 2 && val < 10) {
+		str += '0';
+	}
+	str += val;
 }

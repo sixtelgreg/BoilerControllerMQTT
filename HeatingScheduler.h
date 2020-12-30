@@ -1,10 +1,8 @@
-#ifndef HeatingSchedulerClass
-#define HeatingSchedulerClass
+#ifndef HEATING_SCHEDULER_H
+#define HEATING_SCHEDULER_H
 
-#if ARDUINO >= 100
-#include <Arduino.h> 
-#else
-#include <WProgram.h> 
+#if defined(ARDUINO) && ARDUINO >= 100
+#include <Arduino.h>
 #endif
 
 //#define SCHEDULES_IN_ROM 233456789U
@@ -213,5 +211,5 @@ private:
 	void __SetDefaultSchedules(uint32_t schedulesCode);
 };
 
-#endif // !HeatingSchedulerClass
+#endif // !HEATING_SCHEDULER_H
 

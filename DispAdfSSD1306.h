@@ -1,13 +1,10 @@
-#ifndef DispAdfSSD1306_h
-#define DispAdfSSD1306_h
+#ifndef DISP_ADF_SSD1306_H
+#define DISP_ADF_SSD1306_H
 #include "DataTypes.h"
-
 
 #ifdef Adfr_SSD1306
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 class DispAdfSSD1306
@@ -26,6 +23,8 @@ public:
 		uint16_t x2,
 		uint16_t y2,
 		const char* str2);
+
+	void ShowRssi(int8_t rssi);
 
 	void Show(
 		uint32_t temperature,

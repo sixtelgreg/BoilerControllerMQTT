@@ -1,10 +1,8 @@
-#ifndef _TIME_SPAN_H_
-#define _TIME_SPAN_H_
+#ifndef TIME_SPAN_H
+#define TIME_SPAN_H
 
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 /**************************************************************************/

@@ -1,10 +1,8 @@
-#ifndef PeakControl_h
-#define PeakControl_h
+#ifndef PEAK_CONTROL_H
+#define PEAK_CONTROL_H
 
-#if ARDUINO >= 100
-#include <Arduino.h> 
-#else
-#include <WProgram.h> 
+#if defined(ARDUINO) && ARDUINO >= 100
+#include <Arduino.h>
 #endif
 
 class PeakControl

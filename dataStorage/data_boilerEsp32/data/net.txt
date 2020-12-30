@@ -1,4 +1,4 @@
-WiFi SSID:[MxP024]#
+WiFi SSID:[MxP124]#
 WiFi Passw:[alonaalona]#
 MQTT Domain:[mqtt.beebotte.com]#
 MQTT Client:[RoofBoilerControllerSim_01]#
@@ -9,4 +9,5 @@ MQTT Topic:[Telemetry]#
 MQTT Topic:[HistoryT]#
 MQTT Topic:[HistoryH]#
 MQTT Topic:[Schedule]#
+MQTT Topic:[IsAlive]#
 MQTT Topic:[RX]#

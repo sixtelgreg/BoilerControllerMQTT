@@ -1,12 +1,13 @@
-#pragma once
+#ifndef DATA_CONTAINER_H
+#define DATA_CONTAINER_H
+
 #if defined(ARDUINO) && ARDUINO >= 100
 #include <Arduino.h>
-#else
-#include <WProgram.h>
 #endif
 
 #include "DataTypes.h"
 #include "HeatingScheduler.h"
+#include "HistDateTime.h"
 
 #define HEADER_SIZE 10
 
@@ -63,6 +64,11 @@ struct BTelemetry
 	uint32_t TemperatureMeasurement = 0;
 	DateTime Time;
 
+	BTelemetry() :
+		Header(Opcode::CMD_RT, sizeof(DateTime) + 10)
+	{
+	}
+
 	BTelemetry(
 		uint16_t  flags,
 		uint8_t   heatDestTemp,
@@ -105,7 +111,7 @@ struct BHistHeat
 	HistDateTime HeatHistory[HEAT_HIST_DEEP];
 
 	BHistHeat(
-		const HistDateTime *heatHistory, 
+		const HistDateTime* heatHistory,
 		uint8_t length) :
 		Header(Opcode::CMD_HH, length * sizeof(HistDateTime))
 	{
@@ -137,4 +143,5 @@ struct BSchedule
 
 };
 #pragma pack(pop)
+#endif // DATA_CONTAINER_H
 
